@@ -1,0 +1,26 @@
+{
+  "status_code": 200,
+  "status": "200 OK",
+  "headers": {
+    "Content-Type": [
+      "application/json"
+    ],
+    "Content-Length": [
+      "429"
+    ],
+    "Server": [
+      "gunicorn/19.9.0"
+    ],
+    "Date": [
+      "Mon, 09 Sep 2024 15:00:00 GMT"
+    ],
+    "Connection": [
+      "close"
+    ]
+  },
+  "body": "{\n  \"slideshow\": {\n    \"author\": \"Yours Truly\",\n    \"date\": \"date of publication\",\n    \"slides\": [\n      {\n        \"title\": \"Wake up to WonderWidgets!\",\n        \"type\": \"all\"\n      },\n      {\n        \"items\": [\n          \"Why <em>WonderWidgets</em> are great\",\n          \"Who <em>buys</em> WonderWidgets\"\n        ],\n        \"title\": \"Overview\",\n        \"type\": \"all\"\n      }\n    ],\n    \"title\": \"Sample Slide Show\"\n  }\n}",
+  "response_time_ms": 142,
+  "success": true,
+  "matched_regex": true,
+  "body_regex_pattern": "slideshow"
+}
