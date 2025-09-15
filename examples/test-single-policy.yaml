@@ -1,0 +1,20 @@
+# Test HTTP collector with a single policy for focused testing
+api:
+  url: "http://localhost:8080"
+
+plugins:
+  single-policy-test:
+    source: "./plugin-http-collector"
+    policies:
+      - "../plugin-http-collector-policies/dist/bundle.tar.gz"
+    labels:
+      type: "policy-test"
+      environment: "test"
+    config:
+      url: "https://httpbin.org/status/200"
+      method: "GET"
+      timeout: 2000
+      basic_auth: false
+      check_certificate: true
+
+verbose: 1
