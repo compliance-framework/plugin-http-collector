@@ -3,21 +3,22 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
-	"strconv"
+	"slices"
 	"strings"
 	"time"
 
+	policyManager "github.com/compliance-framework/agent/policy-manager"
 	"github.com/compliance-framework/agent/runner"
 	"github.com/compliance-framework/agent/runner/proto"
-	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"github.com/mitchellh/mapstructure"
 )
 
 // HttpCollectorConfig holds the configuration for the HTTP collector plugin
@@ -54,10 +55,18 @@ type HttpCollectorPlugin struct {
 	config *HttpCollectorConfig
 }
 
+// Validate ensures the configuration is valid
+func (c *HttpCollectorConfig) Validate() error {
+	if c.URL == "" {
+		return fmt.Errorf("url is required in configuration")
+	}
+	return nil
+}
+
 // Configure implements runner.Runner
 // This is called by the agent to provide configuration to the plugin
 func (p *HttpCollectorPlugin) Configure(req *proto.ConfigureRequest) (*proto.ConfigureResponse, error) {
-	p.logger.Debug("Configuring HTTP collector plugin")
+	p.logger.Info("Configuring HTTP collector plugin")
 
 	// Initialize with defaults
 	config := &HttpCollectorConfig{
@@ -66,37 +75,16 @@ func (p *HttpCollectorPlugin) Configure(req *proto.ConfigureRequest) (*proto.Con
 		CheckCertificate: true, // default to secure
 	}
 
-	// Parse configuration from the agent
-	for key, value := range req.Config {
-		switch key {
-		case "url":
-			config.URL = value
-		case "method":
-			config.Method = strings.ToUpper(value)
-		case "timeout":
-			if timeout, err := strconv.Atoi(value); err == nil {
-				config.Timeout = timeout
-			}
-		case "basic_auth":
-			// Handle various boolean representations
-			lowerValue := strings.ToLower(value)
-			config.BasicAuth = lowerValue == "true" || lowerValue == "1" || lowerValue == "yes"
-		case "basic_auth_username":
-			config.BasicAuthUsername = value
-		case "basic_auth_password":
-			config.BasicAuthPassword = value
-		case "additional_headers":
-			config.AdditionalHeaders = value
-		case "check_certificate":
-			config.CheckCertificate = strings.ToLower(value) != "false"
-		case "body_regex_pattern":
-			config.BodyRegexPattern = value
-		}
+	// Use mapstructure for better config parsing
+	if err := mapstructure.Decode(req.Config, config); err != nil {
+		p.logger.Error("Error decoding config", "error", err)
+		return nil, err
 	}
 
-	// Validate required configuration
-	if config.URL == "" {
-		return nil, fmt.Errorf("url is required in configuration")
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		p.logger.Error("Error validating config", "error", err)
+		return nil, err
 	}
 
 	p.config = config
@@ -205,128 +193,213 @@ func (p *HttpCollectorPlugin) makeHttpRequest() (*HttpResponseData, error) {
 	return responseData, nil
 }
 
-// createEvidence converts HTTP response data into Evidence protobuf for compliance reporting
-func (p *HttpCollectorPlugin) createEvidence(responseData *HttpResponseData, jsonData string) (*proto.Evidence, error) {
-	startTime := time.Now().Add(-time.Duration(responseData.ResponseTime) * time.Millisecond)
-	endTime := time.Now()
+// EvaluatePolicies processes policies against HTTP response data using the policy manager
+func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData *HttpResponseData, req *proto.EvalRequest) ([]*proto.Evidence, error) {
+	var accumulatedErrors error
 
-	// Determine evidence status based on HTTP success and regex matching
-	evidenceState := proto.EvidenceStatusState_EVIDENCE_STATUS_STATE_SATISFIED
-	statusReason := "HTTP request successful"
+	activities := make([]*proto.Activity, 0)
+	evidences := make([]*proto.Evidence, 0)
 
-	if !responseData.Success {
-		evidenceState = proto.EvidenceStatusState_EVIDENCE_STATUS_STATE_NOT_SATISFIED
-		if responseData.Error != "" {
-			statusReason = fmt.Sprintf("HTTP request failed: %s", responseData.Error)
-		} else {
-			statusReason = fmt.Sprintf("HTTP request returned non-success status: %d %s", responseData.StatusCode, responseData.Status)
-		}
-	} else if responseData.BodyRegexPattern != "" && !responseData.MatchedRegex {
-		evidenceState = proto.EvidenceStatusState_EVIDENCE_STATUS_STATE_NOT_SATISFIED
-		statusReason = fmt.Sprintf("Response body did not match required pattern: %s", responseData.BodyRegexPattern)
+	// Add HTTP data collection activity
+	activities = append(activities, &proto.Activity{
+		Title:       "Collect HTTP endpoint data",
+		Description: "Execute HTTP request and collect response data for policy validation",
+		Steps: []*proto.Step{
+			{
+				Title:       "Configure HTTP Client",
+				Description: fmt.Sprintf("Set timeout: %dms, certificate check: %t, basic auth: %t", p.config.Timeout, p.config.CheckCertificate, p.config.BasicAuth),
+			},
+			{
+				Title:       "Execute HTTP Request",
+				Description: fmt.Sprintf("Made %s request to %s", p.config.Method, p.config.URL),
+			},
+			{
+				Title:       "Process Response",
+				Description: fmt.Sprintf("Received status %d, processed %d bytes in %dms", responseData.StatusCode, len(responseData.Body), responseData.ResponseTime),
+			},
+		},
+	})
+
+	// Get hostname for inventory identification
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "localhost"
 	}
 
-	// Create evidence with comprehensive metadata
-	description := fmt.Sprintf("HTTP %s request to %s", p.config.Method, p.config.URL)
-	evidence := &proto.Evidence{
-		UUID:        uuid.New().String(),
-		Title:       "HTTP Endpoint Health Check",
-		Description: &description,
-		Start:       timestamppb.New(startTime),
-		End:         timestamppb.New(endTime),
-		Status: &proto.EvidenceStatus{
-			State:   evidenceState,
-			Reason:  statusReason,
-			Remarks: jsonData, // Full JSON response data
+	// Define origin actors
+	actors := []*proto.OriginActor{
+		{
+			Title: "The Continuous Compliance Framework",
+			Type:  "assessment-platform",
+			Links: []*proto.Link{
+				{
+					Href: "https://compliance-framework.github.io/docs/",
+					Rel:  policyManager.Pointer("reference"),
+					Text: policyManager.Pointer("The Continuous Compliance Framework"),
+				},
+			},
 		},
-		Props: []*proto.Property{
-			{Name: "http_url", Value: p.config.URL},
-			{Name: "http_method", Value: p.config.Method},
-			{Name: "status_code", Value: strconv.Itoa(responseData.StatusCode)},
-			{Name: "response_time_ms", Value: strconv.FormatInt(responseData.ResponseTime, 10)},
-			{Name: "success", Value: strconv.FormatBool(responseData.Success)},
+		{
+			Title: "Continuous Compliance Framework - HTTP Collector Plugin",
+			Type:  "tool",
+			Links: []*proto.Link{
+				{
+					Href: "https://github.com/compliance-framework/plugin-http-collector",
+					Rel:  policyManager.Pointer("reference"),
+					Text: policyManager.Pointer("The Continuous Compliance Framework HTTP Collector Plugin"),
+				},
+			},
 		},
-		Activities: []*proto.Activity{
-			{
-				Title:       "HTTP Health Check",
-				Description: fmt.Sprintf("Performed %s request to %s for health monitoring", p.config.Method, p.config.URL),
-				Steps: []*proto.Step{
-					{
-						Title: "Configure HTTP Client",
-						Description: fmt.Sprintf("Set timeout: %dms, certificate check: %t, basic auth: %t",
-							p.config.Timeout, p.config.CheckCertificate, p.config.BasicAuth),
+	}
+
+	// Define components with proper OSCAL modeling
+	components := []*proto.Component{
+		{
+			Identifier:  "common-components/http-endpoint",
+			Type:        "service",
+			Title:       "HTTP Endpoint",
+			Description: "HTTP service endpoint providing API or web services functionality. This component handles HTTP requests and responses, enforcing security policies and performance requirements.",
+			Purpose:     "Serve HTTP requests and provide application functionality with appropriate security, performance, and availability controls.",
+			Protocols: []*proto.Protocol{
+				{
+					UUID:  "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+					Name:  "HTTP",
+					Title: "HyperText Transfer Protocol",
+					PortRanges: []*proto.PortRange{
+						{
+							End:       80,
+							Start:     80,
+							Transport: "TCP",
+						},
 					},
-					{
-						Title:       "Execute HTTP Request",
-						Description: fmt.Sprintf("Made %s request to %s", p.config.Method, p.config.URL),
-					},
-					{
-						Title: "Process Response",
-						Description: fmt.Sprintf("Received status %d, processed %d bytes in %dms",
-							responseData.StatusCode, len(responseData.Body), responseData.ResponseTime),
+				},
+				{
+					UUID:  "B2C3D4E5-F6G7-8901-BCDE-F23456789012",
+					Name:  "HTTPS",
+					Title: "HTTP Secure",
+					PortRanges: []*proto.PortRange{
+						{
+							End:       443,
+							Start:     443,
+							Transport: "TCP",
+						},
 					},
 				},
 			},
 		},
-		Subjects: []*proto.Subject{
-			{
-				Identifier:  p.config.URL,
-				Type:        proto.SubjectType_SUBJECT_TYPE_COMPONENT,
-				Description: fmt.Sprintf("HTTP endpoint at %s", p.config.URL),
+	}
+
+	// Define inventory items
+	inventory := []*proto.InventoryItem{
+		{
+			Identifier: fmt.Sprintf("http-endpoint/%s", p.config.URL),
+			Type:       "service",
+			Title:      fmt.Sprintf("HTTP Endpoint [%s]", p.config.URL),
+			Props: []*proto.Property{
+				{
+					Name:    "url",
+					Value:   p.config.URL,
+					Remarks: policyManager.Pointer("The target URL being monitored for compliance"),
+				},
+				{
+					Name:    "method",
+					Value:   p.config.Method,
+					Remarks: policyManager.Pointer("The HTTP method used for health checks"),
+				},
+				{
+					Name:    "hostname",
+					Value:   hostname,
+					Remarks: policyManager.Pointer("The hostname where the HTTP collector plugin is executed"),
+				},
+			},
+			Links: []*proto.Link{
+				{
+					Href: p.config.URL,
+					Text: policyManager.Pointer("Monitored Endpoint URL"),
+				},
+			},
+			ImplementedComponents: []*proto.InventoryItemImplementedComponent{
+				{
+					Identifier: "common-components/http-endpoint",
+				},
 			},
 		},
 	}
 
-	// Add regex-specific properties if configured
-	if responseData.BodyRegexPattern != "" {
-		evidence.Props = append(evidence.Props, &proto.Property{
-			Name:  "regex_pattern",
-			Value: responseData.BodyRegexPattern,
-		})
-		evidence.Props = append(evidence.Props, &proto.Property{
-			Name:  "regex_matched",
-			Value: strconv.FormatBool(responseData.MatchedRegex),
-		})
+	// Define subjects for policy evaluation
+	subjects := []*proto.Subject{
+		{
+			Type:       proto.SubjectType_SUBJECT_TYPE_COMPONENT,
+			Identifier: "common-components/http-endpoint",
+		},
+		{
+			Type:       proto.SubjectType_SUBJECT_TYPE_INVENTORY_ITEM,
+			Identifier: fmt.Sprintf("http-endpoint/%s", p.config.URL),
+		},
 	}
 
-	return evidence, nil
+	// Process each policy path using the policy manager
+	for _, policyPath := range req.GetPolicyPaths() {
+		processor := policyManager.NewPolicyProcessor(
+			p.logger,
+			map[string]string{
+				"provider":     "http",
+				"type":         "endpoint",
+				"url":          p.config.URL,
+				"method":       p.config.Method,
+				"hostname":     hostname,
+				"_policy_path": policyPath,
+			},
+			subjects,
+			components,
+			inventory,
+			actors,
+			activities,
+		)
+
+		// Generate policy-based evidence
+		evidence, err := processor.GenerateResults(ctx, policyPath, responseData)
+		evidences = slices.Concat(evidences, evidence)
+		if err != nil {
+			accumulatedErrors = errors.Join(accumulatedErrors, err)
+		}
+	}
+
+	p.logger.Debug("Successfully generated evidence", "count", len(evidences))
+	return evidences, accumulatedErrors
 }
 
+
 // Eval implements runner.Runner
-// This is the main execution function where we make HTTP requests and create evidence
+// This is the main execution function where we make HTTP requests and evaluate policies
 func (p *HttpCollectorPlugin) Eval(req *proto.EvalRequest, helper runner.ApiHelper) (*proto.EvalResponse, error) {
+	ctx := context.TODO()
 	p.logger.Debug("Starting HTTP evaluation")
 
-	// Make HTTP request
+	// Make HTTP request and collect data
 	responseData, err := p.makeHttpRequest()
 	if err != nil {
 		p.logger.Error("HTTP request failed", "error", err)
 		return &proto.EvalResponse{Status: proto.ExecutionStatus_FAILURE}, err
 	}
 
-	// Convert response data to JSON for evidence
-	jsonData, err := json.MarshalIndent(responseData, "", "  ")
+	// Evaluate policies against HTTP response data
+	evidences, err := p.EvaluatePolicies(ctx, responseData, req)
 	if err != nil {
-		p.logger.Error("Failed to marshal response data", "error", err)
+		p.logger.Error("Error evaluating policies", "error", err)
 		return &proto.EvalResponse{Status: proto.ExecutionStatus_FAILURE}, err
 	}
 
-	// Create evidence from HTTP response
-	evidence, err := p.createEvidence(responseData, string(jsonData))
-	if err != nil {
-		p.logger.Error("Failed to create evidence", "error", err)
-		return &proto.EvalResponse{Status: proto.ExecutionStatus_FAILURE}, err
-	}
-
-	// Send evidence to the compliance API via helper
-	err = helper.CreateEvidence(context.Background(), []*proto.Evidence{evidence})
-	if err != nil {
+	// Send policy-based evidences to the compliance API
+	if err := helper.CreateEvidence(ctx, evidences); err != nil {
 		p.logger.Error("Failed to send evidence", "error", err)
 		return &proto.EvalResponse{Status: proto.ExecutionStatus_FAILURE}, err
 	}
 
-	p.logger.Info("HTTP evaluation completed successfully", "success", responseData.Success)
-	p.logger.Debug("Response data", "json", string(jsonData))
+	p.logger.Info("HTTP evaluation completed successfully",
+		"success", responseData.Success,
+		"evidence_count", len(evidences),
+		"response_time_ms", responseData.ResponseTime)
 
 	return &proto.EvalResponse{Status: proto.ExecutionStatus_SUCCESS}, nil
 }
