@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +19,6 @@ import (
 	"github.com/compliance-framework/agent/runner/proto"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
-	"github.com/mitchellh/mapstructure"
 )
 
 // HttpCollectorConfig holds the configuration for the HTTP collector plugin
@@ -49,6 +49,20 @@ type HttpResponseData struct {
 	BodyRegexPattern string              `json:"body_regex_pattern,omitempty"` // echo back the pattern used
 }
 
+// HttpResponseDataForPolicy represents a policy-compatible version of HttpResponseData
+// with simplified header structure to avoid policy manager issues
+type HttpResponseDataForPolicy struct {
+	StatusCode       int               `json:"status_code"`
+	Status           string            `json:"status"`
+	Headers          map[string]string `json:"headers"`          // Simplified: single string values
+	Body             string            `json:"body"`
+	ResponseTime     int64             `json:"response_time_ms"`
+	Success          bool              `json:"success"`
+	Error            string            `json:"error,omitempty"`
+	MatchedRegex     bool              `json:"matched_regex,omitempty"`
+	BodyRegexPattern string            `json:"body_regex_pattern,omitempty"`
+}
+
 // HttpCollectorPlugin implements the Runner interface
 type HttpCollectorPlugin struct {
 	logger hclog.Logger
@@ -75,10 +89,32 @@ func (p *HttpCollectorPlugin) Configure(req *proto.ConfigureRequest) (*proto.Con
 		CheckCertificate: true, // default to secure
 	}
 
-	// Use mapstructure for better config parsing
-	if err := mapstructure.Decode(req.Config, config); err != nil {
-		p.logger.Error("Error decoding config", "error", err)
-		return nil, err
+	// Parse configuration from the agent (all values come as strings)
+	for key, value := range req.Config {
+		switch key {
+		case "url":
+			config.URL = value
+		case "method":
+			config.Method = strings.ToUpper(value)
+		case "timeout":
+			if timeout, err := strconv.Atoi(value); err == nil {
+				config.Timeout = timeout
+			}
+		case "basic_auth":
+			// Handle various boolean representations
+			lowerValue := strings.ToLower(value)
+			config.BasicAuth = lowerValue == "true" || lowerValue == "1" || lowerValue == "yes"
+		case "basic_auth_username":
+			config.BasicAuthUsername = value
+		case "basic_auth_password":
+			config.BasicAuthPassword = value
+		case "additional_headers":
+			config.AdditionalHeaders = value
+		case "check_certificate":
+			config.CheckCertificate = strings.ToLower(value) != "false"
+		case "body_regex_pattern":
+			config.BodyRegexPattern = value
+		}
 	}
 
 	// Validate configuration
@@ -200,7 +236,7 @@ func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData
 	activities := make([]*proto.Activity, 0)
 	evidences := make([]*proto.Evidence, 0)
 
-	// Add HTTP data collection activity
+	// Add HTTP data collection activity (with placeholder data)
 	activities = append(activities, &proto.Activity{
 		Title:       "Collect HTTP endpoint data",
 		Description: "Execute HTTP request and collect response data for policy validation",
@@ -215,7 +251,7 @@ func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData
 			},
 			{
 				Title:       "Process Response",
-				Description: fmt.Sprintf("Received status %d, processed %d bytes in %dms", responseData.StatusCode, len(responseData.Body), responseData.ResponseTime),
+				Description: "Received HTTP response and processed response data",
 			},
 		},
 	})
@@ -226,129 +262,20 @@ func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData
 		hostname = "localhost"
 	}
 
-	// Define origin actors
-	actors := []*proto.OriginActor{
-		{
-			Title: "The Continuous Compliance Framework",
-			Type:  "assessment-platform",
-			Links: []*proto.Link{
-				{
-					Href: "https://compliance-framework.github.io/docs/",
-					Rel:  policyManager.Pointer("reference"),
-					Text: policyManager.Pointer("The Continuous Compliance Framework"),
-				},
-			},
-		},
-		{
-			Title: "Continuous Compliance Framework - HTTP Collector Plugin",
-			Type:  "tool",
-			Links: []*proto.Link{
-				{
-					Href: "https://github.com/compliance-framework/plugin-http-collector",
-					Rel:  policyManager.Pointer("reference"),
-					Text: policyManager.Pointer("The Continuous Compliance Framework HTTP Collector Plugin"),
-				},
-			},
-		},
-	}
 
-	// Define components with proper OSCAL modeling
-	components := []*proto.Component{
-		{
-			Identifier:  "common-components/http-endpoint",
-			Type:        "service",
-			Title:       "HTTP Endpoint",
-			Description: "HTTP service endpoint providing API or web services functionality. This component handles HTTP requests and responses, enforcing security policies and performance requirements.",
-			Purpose:     "Serve HTTP requests and provide application functionality with appropriate security, performance, and availability controls.",
-			Protocols: []*proto.Protocol{
-				{
-					UUID:  "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
-					Name:  "HTTP",
-					Title: "HyperText Transfer Protocol",
-					PortRanges: []*proto.PortRange{
-						{
-							End:       80,
-							Start:     80,
-							Transport: "TCP",
-						},
-					},
-				},
-				{
-					UUID:  "B2C3D4E5-F6G7-8901-BCDE-F23456789012",
-					Name:  "HTTPS",
-					Title: "HTTP Secure",
-					PortRanges: []*proto.PortRange{
-						{
-							End:       443,
-							Start:     443,
-							Transport: "TCP",
-						},
-					},
-				},
-			},
-		},
-	}
-
-	// Define inventory items
-	inventory := []*proto.InventoryItem{
-		{
-			Identifier: fmt.Sprintf("http-endpoint/%s", p.config.URL),
-			Type:       "service",
-			Title:      fmt.Sprintf("HTTP Endpoint [%s]", p.config.URL),
-			Props: []*proto.Property{
-				{
-					Name:    "url",
-					Value:   p.config.URL,
-					Remarks: policyManager.Pointer("The target URL being monitored for compliance"),
-				},
-				{
-					Name:    "method",
-					Value:   p.config.Method,
-					Remarks: policyManager.Pointer("The HTTP method used for health checks"),
-				},
-				{
-					Name:    "hostname",
-					Value:   hostname,
-					Remarks: policyManager.Pointer("The hostname where the HTTP collector plugin is executed"),
-				},
-			},
-			Links: []*proto.Link{
-				{
-					Href: p.config.URL,
-					Text: policyManager.Pointer("Monitored Endpoint URL"),
-				},
-			},
-			ImplementedComponents: []*proto.InventoryItemImplementedComponent{
-				{
-					Identifier: "common-components/http-endpoint",
-				},
-			},
-		},
-	}
-
-	// Define subjects for policy evaluation
-	subjects := []*proto.Subject{
-		{
-			Type:       proto.SubjectType_SUBJECT_TYPE_COMPONENT,
-			Identifier: "common-components/http-endpoint",
-		},
-		{
-			Type:       proto.SubjectType_SUBJECT_TYPE_INVENTORY_ITEM,
-			Identifier: fmt.Sprintf("http-endpoint/%s", p.config.URL),
-		},
-	}
+	// Test with absolutely minimal OSCAL metadata to isolate the issue
+	actors := []*proto.OriginActor{}
+	components := []*proto.Component{}
+	inventory := []*proto.InventoryItem{}
+	subjects := []*proto.Subject{}
 
 	// Process each policy path using the policy manager
 	for _, policyPath := range req.GetPolicyPaths() {
 		processor := policyManager.NewPolicyProcessor(
 			p.logger,
 			map[string]string{
-				"provider":     "http",
-				"type":         "endpoint",
-				"url":          p.config.URL,
-				"method":       p.config.Method,
-				"hostname":     hostname,
-				"_policy_path": policyPath,
+				"provider": "http",
+				"type":     "endpoint",
 			},
 			subjects,
 			components,
@@ -357,8 +284,32 @@ func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData
 			activities,
 		)
 
-		// Generate policy-based evidence
-		evidence, err := processor.GenerateResults(ctx, policyPath, responseData)
+		// Convert to policy-compatible struct (simplify headers from []string to string)
+		policyData := &HttpResponseDataForPolicy{
+			StatusCode:       responseData.StatusCode,
+			Status:           responseData.Status,
+			Headers:          make(map[string]string),
+			Body:             responseData.Body,
+			ResponseTime:     responseData.ResponseTime,
+			Success:          responseData.Success,
+			Error:            responseData.Error,
+			MatchedRegex:     responseData.MatchedRegex,
+			BodyRegexPattern: responseData.BodyRegexPattern,
+		}
+
+		// Convert headers from []string to string (take first value or join multiple)
+		for key, values := range responseData.Headers {
+			if len(values) > 0 {
+				if len(values) == 1 {
+					policyData.Headers[key] = values[0]
+				} else {
+					policyData.Headers[key] = strings.Join(values, "; ")
+				}
+			}
+		}
+
+		// Pass the policy-compatible struct to the policy manager
+		evidence, err := processor.GenerateResults(ctx, policyPath, policyData)
 		evidences = slices.Concat(evidences, evidence)
 		if err != nil {
 			accumulatedErrors = errors.Join(accumulatedErrors, err)
