@@ -31,3 +31,4 @@ http-collector
 
 # Build artifacts
 dist/.compliance-framework/
+.compliance-framework/
