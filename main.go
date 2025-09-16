@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -262,11 +263,129 @@ func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData
 	}
 
 
-	// Try empty OSCAL metadata to isolate the issue
-	actors := []*proto.OriginActor{}
-	components := []*proto.Component{}
-	inventory := []*proto.InventoryItem{}
-	subjects := []*proto.Subject{}
+	// Rich OSCAL metadata implementation matching SSH/GitHub plugin patterns
+	actors := []*proto.OriginActor{
+		{
+			Title: "The Continuous Compliance Framework",
+			Type:  "assessment-platform",
+			Links: []*proto.Link{
+				{
+					Href: "https://compliance-framework.github.io/docs/",
+					Rel:  policyManager.Pointer("reference"),
+					Text: policyManager.Pointer("The Continuous Compliance Framework Documentation"),
+				},
+			},
+		},
+		{
+			Title: "Continuous Compliance Framework - HTTP Collector Plugin",
+			Type:  "tool",
+			Links: []*proto.Link{
+				{
+					Href: "https://github.com/compliance-framework/plugin-http-collector",
+					Rel:  policyManager.Pointer("reference"),
+					Text: policyManager.Pointer("HTTP Collector Plugin Repository"),
+				},
+			},
+		},
+	}
+
+	components := []*proto.Component{
+		{
+			Identifier:  "common-components/http-endpoint",
+			Type:        "service",
+			Title:       "HTTP Endpoint",
+			Description: "An HTTP/HTTPS endpoint that provides web services, APIs, or web applications accessible over the internet or internal networks. HTTP endpoints are critical infrastructure components that require security monitoring and compliance validation.",
+			Purpose:     "To provide web services, REST APIs, or web applications while maintaining security standards, availability requirements, and compliance with organizational policies for data protection and service delivery.",
+			Protocols: []*proto.Protocol{
+				{
+					Name:  "HTTP",
+					Title: "Hypertext Transfer Protocol",
+				},
+				{
+					Name:  "HTTPS",
+					Title: "HTTP Secure (HTTP over TLS)",
+				},
+			},
+		},
+		{
+			Identifier:  "common-components/web-service",
+			Type:        "service",
+			Title:       "Web Service",
+			Description: "A web service component that provides functionality over HTTP/HTTPS protocols. This includes REST APIs, web applications, microservices, and other HTTP-based services that require monitoring for security, performance, and compliance.",
+			Purpose:     "To deliver business functionality through web protocols while ensuring security controls, performance standards, and regulatory compliance are maintained throughout the service lifecycle.",
+		},
+	}
+
+	// Parse URL to get host information for inventory
+	parsedURL, err := url.Parse(p.config.URL)
+	if err != nil {
+		p.logger.Warn("Failed to parse URL for OSCAL metadata", "url", p.config.URL, "error", err)
+		parsedURL = &url.URL{Host: "unknown"}
+	}
+
+	inventory := []*proto.InventoryItem{
+		{
+			Identifier: fmt.Sprintf("http-endpoint/%s", strings.ReplaceAll(p.config.URL, "://", "-")),
+			Type:       "http-endpoint",
+			Title:      fmt.Sprintf("HTTP Endpoint: %s", parsedURL.Host),
+			Description: fmt.Sprintf("HTTP endpoint at %s providing web services that require security monitoring and compliance validation. This endpoint is monitored for availability, security headers, response times, and adherence to organizational policies.", p.config.URL),
+			Props: []*proto.Property{
+				{
+					Name:  "url",
+					Value: p.config.URL,
+					Class: policyManager.Pointer("endpoint-configuration"),
+					Remarks: policyManager.Pointer("The complete URL endpoint being monitored for compliance"),
+				},
+				{
+					Name:  "method",
+					Value: p.config.Method,
+					Class: policyManager.Pointer("http-configuration"),
+					Remarks: policyManager.Pointer("HTTP method used for endpoint monitoring"),
+				},
+				{
+					Name:  "scheme",
+					Value: parsedURL.Scheme,
+					Class: policyManager.Pointer("security-classification"),
+					Remarks: policyManager.Pointer("Protocol scheme indicating encryption status (http vs https)"),
+				},
+				{
+					Name:  "host",
+					Value: parsedURL.Host,
+					Class: policyManager.Pointer("network-identifier"),
+					Remarks: policyManager.Pointer("Target host and port for the monitored endpoint"),
+				},
+				{
+					Name:  "timeout",
+					Value: fmt.Sprintf("%d", p.config.Timeout),
+					Class: policyManager.Pointer("performance-configuration"),
+					Remarks: policyManager.Pointer("Request timeout in milliseconds for availability monitoring"),
+				},
+			},
+			ImplementedComponents: []*proto.InventoryItemImplementedComponent{
+				{
+					Identifier: "common-components/http-endpoint",
+				},
+				{
+					Identifier: "common-components/web-service",
+				},
+			},
+		},
+	}
+
+	subjects := []*proto.Subject{
+		{
+			Type:       proto.SubjectType_SUBJECT_TYPE_COMPONENT,
+			Identifier: "common-components/http-endpoint",
+		},
+		{
+			Type:       proto.SubjectType_SUBJECT_TYPE_COMPONENT,
+			Identifier: "common-components/web-service",
+		},
+		{
+			Type:       proto.SubjectType_SUBJECT_TYPE_INVENTORY_ITEM,
+			Identifier: fmt.Sprintf("http-endpoint/%s", strings.ReplaceAll(p.config.URL, "://", "-")),
+		},
+	}
 
 	// Process each policy path using the policy manager
 	p.logger.Debug("Processing policies", "count", len(req.GetPolicyPaths()))
