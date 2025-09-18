@@ -150,6 +150,7 @@ func (c *HttpCollectorConfig) Validate() error {
 		return fmt.Errorf("url is required in configuration")
 	}
 
+	// Validate URL format and ensure it's HTTP/HTTPS
 	parsedURL, err := url.Parse(c.URL)
 	if err != nil || parsedURL.Scheme == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		return fmt.Errorf("invalid url format: must be a valid HTTP or HTTPS URL")
