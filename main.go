@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -150,6 +149,12 @@ func (c *HttpCollectorConfig) Validate() error {
 	if c.URL == "" {
 		return fmt.Errorf("url is required in configuration")
 	}
+
+	parsedURL, err := url.Parse(c.URL)
+	if err != nil || parsedURL.Scheme == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		return fmt.Errorf("invalid url format: must be a valid HTTP or HTTPS URL")
+	}
+
 	return nil
 }
 
@@ -756,6 +761,22 @@ func (p *HttpCollectorPlugin) enhanceEvidenceWithHttpData(evidences []*proto.Evi
 	p.logger.Debug("Enhanced evidence with HTTP data", "properties_added", len(httpProps), "evidence_count", len(evidences))
 }
 
+// processHeaders converts HTTP headers from multi-value format to policy-compatible format
+// Policies expect headers as nested map: input.headers["Content-Type"]
+func processHeaders(headers map[string][]string) map[string]interface{} {
+	headersMap := make(map[string]interface{})
+	for key, values := range headers {
+		if len(values) > 0 {
+			if len(values) == 1 {
+				headersMap[key] = values[0]
+			} else {
+				headersMap[key] = values
+			}
+		}
+	}
+	return headersMap
+}
+
 // EvaluatePolicies processes policies against HTTP response data using the policy manager
 func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData *HttpResponseData, req *proto.EvalRequest) ([]*proto.Evidence, error) {
 	var accumulatedErrors error
@@ -782,13 +803,6 @@ func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData
 			},
 		},
 	})
-
-	// Get hostname for inventory identification
-	hostname, _ := os.Hostname()
-	if hostname == "" {
-		hostname = "localhost"
-	}
-
 
 	// Rich OSCAL metadata implementation matching SSH/GitHub plugin patterns
 	actors := []*proto.OriginActor{
@@ -850,9 +864,20 @@ func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData
 		parsedURL = &url.URL{Host: "unknown"}
 	}
 
+	// Helper to sanitize identifier strings by replacing unsafe characters with '-'
+	sanitizeIdentifier := func(s string) string {
+		// Replace all non-alphanumeric, non-dash, non-underscore characters with '-'
+		re := regexp.MustCompile(`[^a-zA-Z0-9\-_]`)
+		return re.ReplaceAllString(s, "-")
+	}
+
+	// Build identifier from scheme, host, and path
+	idRaw := fmt.Sprintf("%s-%s%s", parsedURL.Scheme, parsedURL.Host, parsedURL.Path)
+	idSafe := sanitizeIdentifier(idRaw)
+
 	inventory := []*proto.InventoryItem{
 		{
-			Identifier: fmt.Sprintf("http-endpoint/%s", strings.ReplaceAll(p.config.URL, "://", "-")),
+			Identifier: fmt.Sprintf("http-endpoint/%s", idSafe),
 			Type:       "http-endpoint",
 			Title:      fmt.Sprintf("HTTP Endpoint: %s", parsedURL.Host),
 			Description: fmt.Sprintf("HTTP endpoint at %s providing web services that require security monitoring and compliance validation. This endpoint is monitored for availability, security headers, response times, and adherence to organizational policies.", p.config.URL),
@@ -922,7 +947,7 @@ func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData
 		},
 		{
 			Type:       proto.SubjectType_SUBJECT_TYPE_INVENTORY_ITEM,
-			Identifier: fmt.Sprintf("http-endpoint/%s", strings.ReplaceAll(p.config.URL, "://", "-")),
+			Identifier: fmt.Sprintf("http-endpoint/%s", idSafe),
 		},
 	}
 
@@ -943,18 +968,8 @@ func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData
 			activities,
 		)
 
-		// Create map[string]interface{} with structure that policies expect
-		// Policies expect headers as nested map: input.headers["Content-Type"]
-		headersMap := make(map[string]interface{})
-		for key, values := range responseData.Headers {
-			if len(values) > 0 {
-				if len(values) == 1 {
-					headersMap[key] = values[0]
-				} else {
-					headersMap[key] = values
-				}
-			}
-		}
+		// Process headers using helper function
+		headersMap := processHeaders(responseData.Headers)
 
 		dataMap := map[string]interface{}{
 			"status_code":        responseData.StatusCode,
@@ -972,7 +987,9 @@ func (p *HttpCollectorPlugin) EvaluatePolicies(ctx context.Context, responseData
 		evidence, err := processor.GenerateResults(ctx, policyPath, dataMap)
 		evidences = append(evidences, evidence...)
 		if err != nil {
-			accumulatedErrors = errors.Join(accumulatedErrors, err)
+			// Wrap error with policy context for better debugging
+			wrappedErr := fmt.Errorf("policy evaluation failed for '%s': %w", policyPath, err)
+			accumulatedErrors = errors.Join(accumulatedErrors, wrappedErr)
 		}
 	}
 
