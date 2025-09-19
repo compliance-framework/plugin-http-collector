@@ -1,0 +1,21 @@
+# Test basic HTTP functionality without policies
+api:
+  url: "http://localhost:8080"
+
+plugins:
+  basic-http-test:
+    source: "./plugin-http-collector"
+    policies: []  # No policies - test basic HTTP functionality
+    labels:
+      type: "basic-test"
+      environment: "test"
+    config:
+      url: "https://httpbin.org/json"
+      method: "GET"
+      timeout: 5000
+      basic_auth: false
+      additional_headers: "User-Agent: ccf-http-collector-test"
+      check_certificate: true
+      body_regex_pattern: "slideshow"
+
+verbose: 1

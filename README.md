@@ -48,8 +48,8 @@ The plugin provides the following data structure to policies:
   "status_code": 200,
   "status": "200 OK",
   "headers": {
-    "Content-Type": ["application/json"],
-    "Content-Length": ["1234"]
+    "Content-Type": "application/json",
+    "Set-Cookie": ["session=abc123", "csrf=xyz789"]
   },
   "body": "response body content",
   "response_time_ms": 150,
@@ -59,6 +59,8 @@ The plugin provides the following data structure to policies:
   "body_regex_pattern": "pattern used for matching"
 }
 ```
+
+**Note:** Headers are provided as strings for single-value headers and arrays for multi-value headers (like cookies).
 
 ## Configuration
 
@@ -73,6 +75,28 @@ The plugin supports the following configuration options:
 - `additional_headers`: Additional headers in format "Key1: Value1;Key2: Value2"
 - `check_certificate`: Validate SSL certificates (default: true)
 - `body_regex_pattern`: Regex pattern to match against response body
+
+## Testing
+
+The plugin includes comprehensive test configurations in the `examples/` directory:
+
+- `test-basic-http.yaml` - Basic HTTP functionality without policies
+- `test-single-policy.yaml` - Policy evaluation with sample endpoint
+- `test-config-with-policies.yaml` - Multiple endpoint testing with policies
+- `test-features.yaml` - Feature testing including authentication
+
+To test the plugin:
+
+```bash
+# Build the plugin
+go build -o plugin-http-collector .
+
+# Test without policies
+agent agent --config examples/test-basic-http.yaml -vv
+
+# Test with policy evaluation
+agent agent --config examples/test-single-policy.yaml -vv
+```
 
 ## Releases
 

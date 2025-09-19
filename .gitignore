@@ -30,4 +30,7 @@ plugin-http-collector
 http-collector
 
 # Build artifacts
-dist/
+dist/.compliance-framework/
+.compliance-framework/
+HTTP_COLLECTOR_IMPROVEMENT_PLAN.md
+POLICY_MANAGER_BUG.md
