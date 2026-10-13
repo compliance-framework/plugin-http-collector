@@ -1,47 +1,48 @@
 # Compliance Framework HTTP Collector Plugin
 
-Fetches HTTP endpoints and runs passed policies against the response data for health monitoring and compliance validation.
+Fetches an HTTP endpoint and evaluates the configured policies against the response, for health monitoring and
+compliance validation.
 
 This plugin is intended to be run as part of an agent to validate HTTP endpoints against defined compliance policies.
 
 ## Policies
 
-When writing OPA / Rego policies for this plugin, they must be added under the `compliance_framework.http_collector`
-rego module:
+The plugin evaluates the policy bundles listed under `policies` in the agent's plugin config, usually the
+[plugin-http-collector-policies](https://github.com/compliance-framework/plugin-http-collector-policies) bundle:
 
-```rego
-# ensure_https.rego
-# package compliance_framework.http_collector.[YOUR_RULE_PATH]
-package compliance_framework.http_collector.ensure_https
+```yaml
+plugins:
+  health-checker:
+    source: ghcr.io/compliance-framework/plugin-http-collector:<version>
+    policies:
+      - ghcr.io/compliance-framework/plugin-http-collector-policies:<version>
+    config:
+      url: https://example.com/health
 ```
 
-The plugin expects Rego policies to output a `violation` key to indicate failed resources, which will be reported to the 
-compliance framework. Additional data can be added to violations, that describe what failed, and recommendations on how 
-to fix them.
+Each run makes one request and evaluates every policy package in every bundle against it, producing one evidence
+per package. Without `policies` the plugin makes the request but produces no evidence.
 
-Here is an example rego policy which ensures that endpoints return successful HTTP status codes:
+Policies are Rego v1 and live under the `compliance_framework.http_collector` package. They report failures with
+a `violation` set, and set `title`, `description` and optionally `labels` (merged into the evidence labels):
 
 ```rego
-# ensure_success_status.rego
 package compliance_framework.http_collector.ensure_success_status
 
-import future.keywords.in
+import rego.v1
 
-violation[{
-    # Title describes the violation
-    "title": "HTTP endpoint returned non-success status code.",
-    # Description adds more details about the violation
-    "description": "HTTP endpoints should return 2xx status codes to indicate successful responses.",
-    # Remarks indicate how this can be fixed or remediated
-    "remarks": "Check the endpoint configuration and ensure the service is running properly."
-}] {
-	input.success == false
+violation contains {} if {
+	not input.success
 }
+
+title := "HTTP endpoint should return successful status codes"
+description := "HTTP endpoints should return 2xx status codes to ensure proper service functionality"
+labels := {"severity": "high"}
 ```
 
-## Response Data Structure
+### Policy input
 
-The plugin provides the following data structure to policies:
+The input is the response, as JSON:
 
 ```json
 {
@@ -59,6 +60,32 @@ The plugin provides the following data structure to policies:
   "body_regex_pattern": "pattern used for matching"
 }
 ```
+
+- `headers` uses Go's canonical header names (`Content-Type`), each with a list of values.
+- `success` is true for a 2xx status.
+- `error` is set only when no response was received (the request could not be built or sent, or the body could
+  not be read). Then `success` is false, `status_code` is 0 (unless the body read failed), and the plugin still
+  evaluates the policies, so the failure is recorded as evidence, before `Eval` reports `FAILURE`.
+- `matched_regex` and `body_regex_pattern` are set only when `body_regex_pattern` is configured
+  (`matched_regex` is left out when false).
+
+### Policy data
+
+`policy_data` from the agent config is passed to the policies as `data`.
+
+### Evidence
+
+Each evidence carries:
+
+- labels `provider: http`, `url` and `method` (with the policy's `_policy` and its own `labels`). Together with
+  the policy they derive the evidence UUID, so the same endpoint and policy keep one evidence history across runs;
+- props `http_url`, `http_method`, `status_code`, `response_time_ms` and `success`, plus `error` when the request
+  failed and `regex_pattern` and `regex_matched` when `body_regex_pattern` is configured;
+- the `HTTP Health Check` activity (client settings, request, response size and time), followed by the policy
+  manager's activities;
+- the endpoint URL as a component subject, and start and end times of the request.
+
+The response itself (the policy input above) is recorded with the evidence's policy evaluation.
 
 ## Configuration
 
