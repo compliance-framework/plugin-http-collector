@@ -11,6 +11,7 @@ import (
 
 	"github.com/compliance-framework/agent/runner/proto"
 	"github.com/hashicorp/go-hclog"
+	gproto "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -29,9 +30,11 @@ const (
 )
 
 type fakeApiHelper struct {
-	calls     int
-	evidences []*proto.Evidence
-	err       error
+	calls            int
+	evidences        []*proto.Evidence
+	err              error
+	subjectTemplates []*proto.SubjectTemplate
+	subjectErr       error
 }
 
 func (f *fakeApiHelper) CreateEvidence(_ context.Context, evidences []*proto.Evidence) error {
@@ -44,8 +47,9 @@ func (f *fakeApiHelper) UpsertRiskTemplates(context.Context, string, []*proto.Ri
 	return nil
 }
 
-func (f *fakeApiHelper) UpsertSubjectTemplates(context.Context, []*proto.SubjectTemplate) error {
-	return nil
+func (f *fakeApiHelper) UpsertSubjectTemplates(_ context.Context, templates []*proto.SubjectTemplate) error {
+	f.subjectTemplates = append(f.subjectTemplates, templates...)
+	return f.subjectErr
 }
 
 func newConfiguredPlugin(t *testing.T, config map[string]string) *HttpCollectorPlugin {
@@ -380,5 +384,50 @@ func TestEvalPassesPolicyData(t *testing.T) {
 		if got := string(evidence.GetPolicyEvaluation().GetPolicyData()); got != `{"max_response_time_ms":2000}` {
 			t.Errorf("policy data recorded for %s = %s", evidence.GetLabels()["_policy"], got)
 		}
+	}
+}
+
+func TestInitRegistersSubjectTemplate(t *testing.T) {
+	p := newConfiguredPlugin(t, map[string]string{"url": "http://example.test/health", "method": "head"})
+	helper := &fakeApiHelper{}
+
+	if _, err := p.Init(&proto.InitRequest{PolicyPaths: []string{testPolicies}}, helper); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	want := &proto.SubjectTemplate{
+		Name:                "http-endpoint",
+		Type:                proto.SubjectType_SUBJECT_TYPE_COMPONENT,
+		TitleTemplate:       "HTTP Endpoint: {{ .method }} {{ .url }}",
+		DescriptionTemplate: "HTTP endpoint {{ .url }} checked with {{ .method }}",
+		PurposeTemplate:     "Represents an HTTP endpoint whose availability and response are checked",
+		IdentityLabelKeys:   []string{"url", "method"},
+		LabelSchema: []*proto.SubjectLabelSchema{
+			{Key: "url", Description: "The URL requested"},
+			{Key: "method", Description: "The HTTP method used"},
+		},
+	}
+	if len(helper.subjectTemplates) != 1 {
+		t.Fatalf("Init sent %d subject templates, want 1", len(helper.subjectTemplates))
+	}
+	if got := helper.subjectTemplates[0]; !gproto.Equal(got, want) {
+		t.Fatalf("subject template = %v\nwant %v", got, want)
+	}
+
+	// The evidence must carry every identity label, or the API cannot resolve the subject.
+	labels := p.labels()
+	for _, key := range want.GetIdentityLabelKeys() {
+		if labels[key] == "" {
+			t.Errorf("evidence labels %v have no identity label %q", labels, key)
+		}
+	}
+}
+
+func TestInitSubjectTemplateError(t *testing.T) {
+	p := newConfiguredPlugin(t, map[string]string{"url": "http://example.test/health"})
+	upsertErr := errors.New("api unavailable")
+
+	if _, err := p.Init(&proto.InitRequest{}, &fakeApiHelper{subjectErr: upsertErr}); !errors.Is(err, upsertErr) {
+		t.Fatalf("Init error = %v, want %v", err, upsertErr)
 	}
 }

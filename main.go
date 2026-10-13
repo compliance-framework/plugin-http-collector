@@ -52,7 +52,9 @@ type HttpResponseData struct {
 	endedAt   time.Time
 }
 
-// HttpCollectorPlugin implements the Runner interface
+var _ runner.RunnerV2 = (*HttpCollectorPlugin)(nil)
+
+// HttpCollectorPlugin implements the RunnerV2 interface
 type HttpCollectorPlugin struct {
 	logger     hclog.Logger
 	config     *HttpCollectorConfig
@@ -355,6 +357,31 @@ func (p *HttpCollectorPlugin) EvalPolicies(ctx context.Context, responseData *Ht
 	return evidences, accumulatedErrors
 }
 
+// subjectTemplates are the subjects the plugin registers in Init: one HTTP endpoint per
+// URL and method, matching the evidence labels.
+func subjectTemplates() []*proto.SubjectTemplate {
+	return []*proto.SubjectTemplate{
+		{
+			Name:                "http-endpoint",
+			Type:                proto.SubjectType_SUBJECT_TYPE_COMPONENT,
+			TitleTemplate:       "HTTP Endpoint: {{ .method }} {{ .url }}",
+			DescriptionTemplate: "HTTP endpoint {{ .url }} checked with {{ .method }}",
+			PurposeTemplate:     "Represents an HTTP endpoint whose availability and response are checked",
+			IdentityLabelKeys:   []string{"url", "method"},
+			LabelSchema: []*proto.SubjectLabelSchema{
+				{Key: "url", Description: "The URL requested"},
+				{Key: "method", Description: "The HTTP method used"},
+			},
+		},
+	}
+}
+
+// Init implements runner.RunnerV2: it registers the subject templates and the risk
+// templates of the configured policies.
+func (p *HttpCollectorPlugin) Init(req *proto.InitRequest, apiHelper runner.ApiHelper) (*proto.InitResponse, error) {
+	return runner.InitWithSubjectsAndRisksFromPolicies(context.Background(), p.logger, req, apiHelper, subjectTemplates())
+}
+
 // Eval implements runner.Runner.
 // It requests the configured URL, evaluates the configured policies against the response
 // and sends the resulting evidence to the API.
@@ -410,7 +437,7 @@ func main() {
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: runner.HandshakeConfig,
 		Plugins: map[string]plugin.Plugin{
-			"runner": &runner.RunnerGRPCPlugin{
+			"runner": &runner.RunnerV2GRPCPlugin{
 				Impl: &HttpCollectorPlugin{
 					logger: logger,
 				},
