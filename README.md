@@ -87,6 +87,24 @@ Each evidence carries:
 
 The response itself (the policy input above) is recorded with the evidence's policy evaluation.
 
+## Subject
+
+The plugin speaks plugin protocol v2. In `Init` it registers one subject template with the API, and the risk
+templates of the configured policies:
+
+| Field | Value |
+|---|---|
+| Name | `http-endpoint` |
+| Type | `COMPONENT` |
+| Title | `HTTP Endpoint: {{ .method }} {{ .url }}` |
+| Description | `HTTP endpoint {{ .url }} checked with {{ .method }}` |
+| Purpose | `Represents an HTTP endpoint whose availability and response are checked` |
+| Identity labels | `url`, `method` |
+
+Label schema: `url` is the URL requested, `method` the HTTP method used (upper case). Every evidence carries
+both labels, so the API links it to one subject per endpoint and method. Agents that don't call `Init`
+(protocol v1) get the same evidence.
+
 ## Configuration
 
 The plugin supports the following configuration options:
