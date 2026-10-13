@@ -7,7 +7,10 @@ api:
 plugins:
   health-checker:
     source: "./plugin-http-collector"  # Path to compiled plugin binary
-    policies: []  # No policies needed for basic test
+    # Without policies the plugin produces no evidence. The bundle needs a published
+    # plugin-http-collector-policies release; a local path to its policies/ directory also works.
+    policies:
+      - "ghcr.io/compliance-framework/plugin-http-collector-policies:latest"
     labels:
       type: "http-health-check"
       environment: "test"
@@ -22,7 +25,8 @@ plugins:
 
   metrics-checker:
     source: "./plugin-http-collector"  # Same plugin, different config
-    policies: []
+    policies:
+      - "ghcr.io/compliance-framework/plugin-http-collector-policies:latest"
     labels:
       type: "metrics-check"
       environment: "test"
@@ -36,7 +40,8 @@ plugins:
 
   auth-test:
     source: "./plugin-http-collector"  # Test basic auth
-    policies: []
+    policies:
+      - "ghcr.io/compliance-framework/plugin-http-collector-policies:latest"
     labels:
       type: "auth-test"
       environment: "test"
