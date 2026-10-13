@@ -1,0 +1,4 @@
+lisa-design:
+- ci.yml is mock-plugin-1's caller verbatim (jobs ci, release-checks, notify; pull_request types incl. labeled/unlabeled/closed; push to main), minus its mock-only first comment line, with all three uses: pinned to workflows v1.5.2 (6e7fc9c04b59c7d1117938da397f8a6f8df036ab).
+- push.yml/test.yml deleted (only push.yml called test.yml); release.yml and build-and-upload.yml untouched (W3 replaces them).
+- goreleaser archives.format -> formats: [tar.gz]; snapshot archives compared before/after: same five names and contents (README.md, plugin).
