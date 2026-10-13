@@ -1,0 +1,3 @@
+lisa-design:
+- Subject template is exactly the W2 decision: http-endpoint, COMPONENT (the automation depends on COMPONENT), identity labels [url, method], label schema url + method only (not provider). The test compares the whole template with proto.Equal and checks that the evidence labels carry every identity label.
+- Init = runner.InitWithSubjectsAndRisksFromPolicies (plugin-jira model); the plugin is served as runner.RunnerV2GRPCPlugin under "runner". Configure/Eval are unchanged, so v1 agents get the same evidence.
