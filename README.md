@@ -121,8 +121,8 @@ The plugin supports the following configuration options:
 
 ## Releases
 
-This plugin is released using goreleaser to build binaries, and Docker to build OCI artifacts, 
-which will ensure a binary is built for most OS and Architecture combinations. 
+Releases come from release-please PRs: merging one tags the release, and the release workflow publishes it.
+Release candidates (`vX.Y.Z-rcN`) come from the `cut-prerelease` workflow.
 
 You can find the binaries on each release of this plugin in the GitHub releases page.
 
