@@ -1,0 +1,2 @@
+lisa-selfreview:
+Self-review pass 1 (strict): approve, no findings. Callers match the merged batch-1 reference (plugin-file-attestation#9) with v1.5.2 pins; release-please-config.json equals workflows release-please/defaults.json plus packages; .goreleaser.yaml equals mock-plugin-1's (except a trailing newline). Manifest seeded at 0.1.0 (releases/latest v0.1.0, ancestor of main). Protocol note: v0.1.0 OCI index has no org.ccf.plugin.protocol.version annotation (agent defaults to v1); the next release carries =2.
