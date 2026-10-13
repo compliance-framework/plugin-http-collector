@@ -8,3 +8,9 @@ lisa-design:
 - No policy paths: request is made, no evidence, SUCCESS with a warning log.
 - Clock seam (p.now) so the response_time_check violation is tested without a 5 s sleep.
 - Fixtures: testdata/policies = the three non-test .rego files copied verbatim from plugin-http-collector-policies@3f4811593af2df92021d9baccb4b43181e6f2fe2 (PR #2, Rego v1). main is Rego v0 and does not parse on the agent's OPA 1.14.1.
+
+lisa-selfreview:
+pass 1 (approve, nothing fixed):
+- Question (CORE-REL-001): the evidence shape changes (title, status reason/remarks, UUIDs, labels) under a `feat:` title chosen by the spec, not `feat!:`. Listed as an open question in the PR body.
+- Deferred, out of scope: examples/policies/*.rego are stale Rego v0 copies of the policies repo (they do not parse on the agent's OPA 1.x since the bump); examples/README.md still describes them. Follow-up: delete them and point to plugin-http-collector-policies.
+- Deferred: matched_regex is omitted from the input when false (pre-existing omitempty); kept so the input stays identical to the old status.remarks JSON. Documented in README.
