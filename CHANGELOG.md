@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/compliance-framework/plugin-http-collector/compare/v0.2.0...v0.2.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **deps:** bump agent to v0.9.3, workflows to v1.7.0 ([#20](https://github.com/compliance-framework/plugin-http-collector/issues/20)) ([e4cabda](https://github.com/compliance-framework/plugin-http-collector/commit/e4cabda25e70b13c3ae2959ed204400b77c57712))
+* **deps:** update all non-major dependencies ([#18](https://github.com/compliance-framework/plugin-http-collector/issues/18)) ([9559710](https://github.com/compliance-framework/plugin-http-collector/commit/95597102eeb64977fb3857bca10b6d0b8a5ca8fd))
+
 ## [0.2.0](https://github.com/compliance-framework/plugin-http-collector/compare/v0.1.0...v0.2.0) (2026-10-14)
 
 
