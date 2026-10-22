@@ -3,7 +3,7 @@ module github.com/compliance-framework/plugin-http-collector
 go 1.26.1
 
 require (
-	github.com/compliance-framework/agent v0.9.2
+	github.com/compliance-framework/agent v0.9.3
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.8.0
 	google.golang.org/protobuf v1.36.12
