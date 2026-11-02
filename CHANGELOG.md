@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/compliance-framework/plugin-http-collector/compare/v0.2.1...v0.2.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** build with the go1.26.10 toolchain so Renovate can ship Go security fixes ([#22](https://github.com/compliance-framework/plugin-http-collector/issues/22)) ([7256667](https://github.com/compliance-framework/plugin-http-collector/commit/72566670e3b34df9ab62970dc794e66f97050750))
+* **deps:** bump agent to v0.9.6 ([#26](https://github.com/compliance-framework/plugin-http-collector/issues/26)) ([72c3da1](https://github.com/compliance-framework/plugin-http-collector/commit/72c3da16f7d81ac56c544b847e76eedcfa12320c))
+
 ## [0.2.1](https://github.com/compliance-framework/plugin-http-collector/compare/v0.2.0...v0.2.1) (2026-10-28)
 
 
