@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3](https://github.com/compliance-framework/plugin-http-collector/compare/v0.2.2...v0.2.3) (2026-11-13)
+
+
+### Bug Fixes
+
+* **deps:** update go toolchain directive to v1.27.4 [security] ([#27](https://github.com/compliance-framework/plugin-http-collector/issues/27)) ([b5a1d6e](https://github.com/compliance-framework/plugin-http-collector/commit/b5a1d6e7b579ee913fdd91c1909237a161ef09d9))
+* **deps:** update module golang.org/x/crypto to v0.59.0 [security] ([#29](https://github.com/compliance-framework/plugin-http-collector/issues/29)) ([8138983](https://github.com/compliance-framework/plugin-http-collector/commit/8138983f042ab16db636995f3ae24262c90523db))
+
 ## [0.2.2](https://github.com/compliance-framework/plugin-http-collector/compare/v0.2.1...v0.2.2) (2026-11-02)
 
 
